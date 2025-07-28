@@ -4,6 +4,10 @@ import org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile
 import java.text.SimpleDateFormat
 import java.util.Date
 
+abstract class VersioningExtension {
+    abstract val version: Property<String>
+}
+
 plugins {
     groovy
     kotlin("jvm") version libs.versions.kotlin
@@ -55,13 +59,27 @@ fun String.formatBranchName(): String {
     return this.replace(specialCharsRegex, "-").uppercase()
 }
 
-fun createVersion(): String {
+val defaultBranches = listOf("main", "master")
+fun createVersion(): Provider<String> {
     val gitShortHash = grgit.head().abbreviatedId
     val dateTag = SimpleDateFormat("yyyyMMdd").format(Date())
-    return if (grgit.branch.current().name == "master") {
-        "$dateTag-$gitShortHash"
+    return if (grgit.branch.current().name in defaultBranches) {
+        provider { "$dateTag-$gitShortHash" }
     } else {
-        "${grgit.branch.current().name.formatBranchName()}-SNAPSHOT"
+        provider { "${grgit.branch.current().name.formatBranchName()}-SNAPSHOT" }
+    }
+}
+
+val extension = extensions.create("versioning", VersioningExtension::class.java)
+extension.version.set(createVersion())
+
+val versioning = extensions.getByType<VersioningExtension>()
+tasks.register("printVersion") {
+    group = "versioning"
+    description = "Prints the calculated project version for use outside of gradle, i.e. CICD pipelines/docker image.\n" +
+            "Run with `./gradlew :build-plugin:plugin:printVersion -q`"
+    doLast {
+        println(versioning.version.get())
     }
 }
 
@@ -71,7 +89,7 @@ gradlePlugin {
         create("terraformPlugin") {
             id = "org.ysb33r.terraform" // property("ID").toString()
             implementationClass = "org.ysb33r.gradle.terraform.plugins.TerraformPlugin"
-            version = createVersion()
+            version = createVersion().get()
             displayName = "Terraform Plugin"
             description =
                 """
